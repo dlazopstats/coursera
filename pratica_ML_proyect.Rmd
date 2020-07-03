@@ -1,0 +1,153 @@
+---
+title: Practical Machine Learning Coursera Course Project
+subtitle    : Predicting the manner in which people do excercise 
+author: Diego Alonso Lazo Paz
+job: Stutdent
+output: pdf_document
+framework   : io2012        
+highlighter : highlight.js  
+hitheme     : tomorrow       
+url:
+  lib: ../../librariesNew
+  assets: ../../assets
+widgets     : [mathjax]            
+mode        : selfcontained 
+---
+```{r,include=FALSE}
+library(caret);library(dplyr);library(ggplot2);library(gbm);library(rpart);library(rpart.plot);library(rattle);library(RColorBrewer);library(corrplot);library(explore);library(DataExplorer);library(naniar);library(MLmetrics)
+```
+
+```{r,echo=TRUE}
+train<-read.csv("pml-training.csv")
+test<-read.csv("pml-testing.csv")
+val_df<-test
+```
+
+## Background
+* Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways.
+* The objective of this project is to predict the manner in which people do excercise using different machine learning models. 
+
+## Partition of the traning data
+```{r,fig.width=6.5, fig.height=3,echo=TRUE}
+indx  <- createDataPartition(train$classe, p=0.7, list=FALSE)
+Traindf0 <- train[indx, ]
+Testdf0  <- train[-indx, ]
+```
+
+
+## Exploratory data Analysis
+* In this part we look to understand the data in order to obtain insights and have a first look into the behaviour of the variables
+```{r,fig.width=6.5, fig.height=3,echo=TRUE}
+Traindf0 %>% explore_tbl()
+introduce(Traindf0)
+```
+* We 19.6k observations and  160 variables, which 123 are double or integer, the rest are characters.
+* 61 double variables have NA values.
+```{r,fig.width=6.5, fig.height=3, echo=TRUE}
+plot_intro(Traindf0)
+```
+* So we are going to remove the variables with too many missing values and also the the variables with near zero variance
+```{r, echo=TRUE}
+#Remove variable with many NAS
+Traindf1<- Testdf0[, colSums(is.na(Testdf0)) == 0]
+Testdf1 <- Testdf0[, colSums(is.na(Testdf0)) == 0]
+# remove variables with Nearly Zero Variance
+near_zero_var <- nearZeroVar(Traindf1)
+Traindf2 <- Traindf1[, -near_zero_var]
+Testdf2  <- Testdf1[, -near_zero_var]
+# remove identification only variables (columns 1 to 5)
+Traindf3 <- Traindf2[, -(1:5)]
+Testdf3  <- Testdf2[, -(1:5)]
+```
+
+### Correlation Analysis
+```{r,fig.width=6.5, fig.height=3, echo=TRUE}
+corMatrix <- cor(Traindf3[, -54])
+corrplot(corMatrix, order = "FPC", method = "color", type = "lower", 
+         tl.cex = 0.8, tl.col = rgb(0, 0, 0))
+```
+* The plot is not much of a help , so with use a function to find the variables with the highest correlation
+
+```{r,fig.width=6.5, fig.height=3, echo=TRUE}
+highlyCorrelated = findCorrelation(corMatrix, cutoff=0.80)
+names(Traindf3)[highlyCorrelated]
+```
+
+## Predictive Modelling
+* In order to obtain the best prediction, we are going to use differente models to get the best prediction, and if it is possible, combine predictions to get the best prediction possible
+* For this part we are going to use the next models: simple classification tree (rpart), K-Nearest Neighbords (knn), random forest and a Generalized Boosted Regression Models(gbm)
+
+### Classification tree
+```{r,fig.width=6.5, fig.height=3, echo=TRUE}
+set.seed(123)
+class_tree <- rpart(classe ~ ., data=Traindf3, method="class")
+fancyRpartPlot(class_tree)
+```
+
+```{r,fig.width=6.5, fig.height=3, echo=TRUE}
+predict_clstree <- predict(class_tree, Testdf3, type = "class")
+conf_mtree <- confusionMatrix(predict_clstree, Testdf3$classe %>% as.factor())
+conf_mtree
+plot(conf_mtree$table, col = conf_mtree$byClass, main = paste("Accuracy =", round(conf_mtree$overall['Accuracy'], 4)))
+```
+* With this simple model we get an accuracy of 0.82
+
+### K-Nearest Neighbords
+```{r, echo=TRUE}
+set.seed(12345)
+ctrlKNN <- trainControl(method="cv", number=5, classProbs= TRUE, summaryFunction = multiClassSummary)
+m_kknn <- train(classe~., 
+                data=Traindf3,
+                trControl = ctrlKNN,
+                method="kknn" )
+m_kknn$finalModel
+predict_knn <- predict(m_kknn, newdata=Testdf3)
+cmkn <- confusionMatrix(predict_knn, Testdf3$classe %>% as.factor())
+cmkn
+```
+
+### Random Forest
+```{r,fig.width=6.5, fig.height=3, echo=TRUE}
+set.seed(12345)
+ctrlRF <- trainControl(method="cv", number=5, verboseIter=FALSE)
+rf_model <- train(classe ~ ., 
+                  data=Traindf3, 
+                  trControl = ctrlRF,
+                  method="rf")
+rf_model$finalModel
+predict_RF <- predict(rf_model, newdata=Testdf3)
+cmrf <- confusionMatrix(predict_RF, Testdf3$classe %>% as.factor())
+cmrf
+plot(rf_model)
+
+```
+
+### Generalized Boosted Regression Models(gbm)
+```{r,fig.width=6.5, fig.height=3, echo=TRUE}
+set.seed(12345)
+ctrlGBM <- trainControl(method = "repeatedcv", number = 5)
+gbm_model <- train(classe ~ ., 
+                  data=Traindf3, 
+                  trControl = ctrlGBM,
+                  method="gbm",
+                  verbose=FALSE)
+gbm_model$finalModel
+predict_gbm <- predict(gbm_model, newdata=Testdf3)
+cmgbm <- confusionMatrix(predict_gbm, Testdf3$classe %>% as.factor())
+cmgbm
+plot(gbm_model)
+```
+
+## Apply the best model to validation data
+The accuracy of the 4 classification models  are:
+Decision Tree : 0.8054
+KNN: 0.999
+Random Forest : 0.999
+GBM : 0.9932
+* We choose the GBM because de RF and KNN are overfitting the data
+
+```{r,fig.width=6.5, fig.height=3, echo=TRUE}
+Results <- predict(gbm_model, newdata=val_df)
+Results
+```
+
