@@ -1,2 +1,2 @@
-# coursera
-git repositore for the coursera specialization in statistics and machine learning
+Practical Machine Learning Project
+Diego Lazo Paz
